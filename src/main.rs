@@ -6,6 +6,8 @@
 
 use serde::Deserialize;
 
+mod config;
+
 /// This is what we're going to decode into. Each field is optional, meaning
 /// that it doesn't have to be present in TOML.
 #[derive(Debug, Deserialize)]
@@ -36,7 +38,7 @@ struct PeerConfig {
 #[derive(Debug, Deserialize)]
 struct Project {
     name: Option<String>,
-    path: Option<String>,
+    path: String,
 }
 
 fn main() {
@@ -58,8 +60,23 @@ fn main() {
         [[project]]
         name = "apollo"
         path = "~/repos/apollo/"
+
+        [[project]]
+        path = "~/repos/zeus/"
     "#;
 
     let decoded: Config = toml::from_str(toml_str).unwrap();
-    println!("{decoded:#?}");
+    match decoded.project {
+        Some(p) => {
+            for pp in p {
+                let aaa = pp.path;
+                println!("{}", aaa);
+            }
+        }
+        None => println!("inga res"),
+    }
+    config::parser::parse();
+    // println!("{decoded:#?}");
+    let ecfg = config::env::load_envs();
+    println!("{}", ecfg);
 }
