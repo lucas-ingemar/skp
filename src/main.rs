@@ -1,82 +1,150 @@
-//! An example showing off the usage of `Deserialize` to automatically decode
-//! TOML into a Rust `struct`
-
-#![deny(warnings)]
-#![allow(dead_code)]
-
-use serde::Deserialize;
+use clap::Command;
+use clap_complete::{generate, Generator, Shell};
+use std::io::{self};
 
 mod config;
+mod project;
 
-/// This is what we're going to decode into. Each field is optional, meaning
-/// that it doesn't have to be present in TOML.
-#[derive(Debug, Deserialize)]
-struct Config {
-    global_string: Option<String>,
-    global_integer: Option<u64>,
-    server: Option<ServerConfig>,
-    peers: Option<Vec<PeerConfig>>,
-    project: Option<Vec<Project>>,
+const ZSH_COMPLETION: &str = r#"#compdef skp
+
+ _skp_project_completion() {
+     local values
+     values=(${(f)"$(skp ls 2>/dev/null)"})
+     _describe 'values' values
+ }
+
+ _skp() {
+     local line
+
+    eval "$(skp completions zsh)"
+    functions[_skp_real]="${functions[_skporgcompletions]}"
+
+     _arguments -C \
+         "1: :->cmds" \
+         "*::arg:->args"
+
+     case "$state" in
+         args)
+             case $line[1] in
+                 project)
+                     _skp_project_completion
+                     return
+                     ;;
+                 *)
+                     _skp_real "$@"
+                     return
+                     ;;
+             esac
+             ;;
+         *)
+              _skp_real "$@"
+              return
+             ;;
+     esac
+ }
+
+ if [[ -n ${ZSH_VERSION-} ]]; then
+     compdef _skp skp
+
+     # FIXME This should be given by the user
+     p() { eval "$(skp project $@)"; }
+     compdef _skp_project_completion p
+ fi"#;
+
+fn build_cli(name: &'static str) -> Command {
+    Command::new(name)
+        .subcommand(
+            Command::new("complete")
+                .about("Generate shell completions")
+                .arg(
+                    clap::Arg::new("shell")
+                        .value_parser(clap::value_parser!(Shell))
+                        .required(true),
+                ),
+        )
+        .subcommand(
+            Command::new("completions")
+                .about("Generate shell completions")
+                .arg(
+                    clap::Arg::new("shell")
+                        .value_parser(clap::value_parser!(Shell))
+                        .required(true),
+                ),
+        )
+        .subcommand(
+            Command::new("project")
+                .about("Move to a project")
+                .arg(clap::Arg::new("name").required(true)),
+        )
+        .subcommand(Command::new("ls").about("List projects"))
 }
 
-/// Sub-structs are decoded from tables, so this will decode from the `[server]`
-/// table.
-///
-/// Again, each field is optional, meaning they don't have to be present.
-#[derive(Debug, Deserialize)]
-struct ServerConfig {
-    ip: Option<String>,
-    port: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PeerConfig {
-    ip: Option<String>,
-    port: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Project {
-    name: Option<String>,
-    path: String,
+fn print_completions<G: Generator>(gen1: G, cmd: &mut Command) {
+    generate(gen1, cmd, cmd.get_name().to_string(), &mut io::stdout());
 }
 
 fn main() {
-    let toml_str = r#"
-        global_string = "test"
-        global_integer = 5
+    let ecfg = match config::env::load_env_cfg() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("ERROR {}", e);
+            return;
+        }
+    };
 
-        [server]
-        ip = "127.0.0.1"
-        port = 80
+    let cfg = match config::parser::parse(ecfg) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("ERROR {}", e);
+            return;
+        }
+    };
 
-        [[peers]]
-        ip = "127.0.0.1"
-        port = 8080
+    let mut cmd = build_cli("skp");
+    let matches = cmd.clone().get_matches();
 
-        [[peers]]
-        ip = "127.0.0.1"
-
-        [[project]]
-        name = "apollo"
-        path = "~/repos/apollo/"
-
-        [[project]]
-        path = "~/repos/zeus/"
-    "#;
-
-    let decoded: Config = toml::from_str(toml_str).unwrap();
-    match decoded.project {
-        Some(p) => {
-            for pp in p {
-                let aaa = pp.path;
-                println!("{}", aaa);
+    match matches.subcommand() {
+        Some(("complete", sub_matches)) => {
+            let shell = sub_matches
+                .get_one::<Shell>("shell")
+                .expect("shell is required");
+            if *shell == Shell::Zsh {
+                println!("{}", ZSH_COMPLETION);
+            } else {
+                print_completions(*shell, &mut cmd);
             }
         }
-        None => println!("inga res"),
+        Some(("completions", sub_matches)) => {
+            let shell = sub_matches
+                .get_one::<Shell>("shell")
+                .expect("shell is required");
+            let mut cmd2 = build_cli("skporgcompletions");
+            print_completions(*shell, &mut cmd2);
+        }
+        Some(("project", sub_matches)) => {
+            if let Some(name) = sub_matches.get_one::<String>("name") {
+                print!("{}", project::build_cmd(name.to_string(), cfg));
+                // if let Some(projects) = cfg.project {
+                //     match projects.iter().find(|proj| proj.name == *name) {
+                //         Some(p) => print!("cd {}; tmux rename-window {}", p.path, p.name),
+                //         None => return,
+                //     }
+                // }
+            }
+        }
+        Some(("ls", _)) => {
+            if let Some(projects) = cfg.project {
+                for p in projects {
+                    // let name = match p.name {
+                    //     Some(s) => s,
+                    //     None => "ajda".to_string(),
+                    // };
+                    println!("{}:{}", p.name, p.path)
+                }
+            }
+        }
+        _ => {
+            cmd.print_help().unwrap();
+        }
     }
-    config::parser::parse();
-    // println!("{decoded:#?}");
-    let ecfg = config::env::load_envs();
-    println!("{}", ecfg);
 }

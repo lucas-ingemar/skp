@@ -1,37 +1,40 @@
+use anyhow::Error;
 use std::env;
 use std::fmt;
+use std::path::PathBuf;
+use std::str::FromStr;
 use xdg;
 
 const APP_NAME: &str = "skp";
 
 pub struct Config {
-    config_file: String,
+    pub config_file: PathBuf,
 }
 
 impl fmt::Display for Config {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Define how to format the output
         match &self.config_file {
-            file => write!(f, "Config file: {}", file),
+            file => write!(f, "Config file: {}", file.display()),
         }
     }
 }
 
-pub fn load_envs() -> Config {
+fn env_name(name: &str) -> String {
+    format!("{APP_NAME}_{name}").to_ascii_uppercase()
+}
+
+pub fn load_env_cfg() -> Result<Config, Error> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix(APP_NAME);
 
-    match xdg_dirs.config_home {
-        Some(d) => println!("{}/{}/config.toml", d.to_str().unwrap(), APP_NAME),
-        None => println!("fel fel"),
-    }
-
     let mut c = Config {
-        config_file: "df".to_string(),
+        config_file: xdg_dirs.place_config_file("config.toml")?,
     };
 
-    match env::var(APP_NAME) {
-        Ok(t) => c.config_file = t,
+    match env::var(env_name("config_file")) {
+        Ok(t) => c.config_file = PathBuf::from_str(t.as_str())?,
         Err(_) => (),
     }
-    c
+
+    Ok(c)
 }
